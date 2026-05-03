@@ -1,0 +1,271 @@
+<!DOCTYPE html>
+<html lang="pt-br">
+<head>
+    <meta charset="UTF-8">
+    <title>DESAFIO DAS 20 CHAVES - TRILHA DINÂMICA</title>
+    <style>
+        body { margin: 0; overflow: hidden; background: #050505; font-family: 'Courier New', Courier, monospace; touch-action: none; transition: background-color 1s ease; }
+        #gameCanvas { display: block; filter: contrast(1.1) brightness(1); }
+        #ui { 
+            position: absolute; top: 20px; left: 20px; color: #ff0000; 
+            font-size: 18px; text-transform: uppercase; letter-spacing: 2px;
+            z-index: 10; pointer-events: none;
+            background: rgba(0, 0, 0, 0.8); padding: 10px; border-radius: 5px;
+            border: 1px solid #900;
+        }
+        #jumpscare {
+            display: none; position: fixed;
+            top: 0; left: 0; width: 100vw; height: 100vh;
+            background-color: black; z-index: 999;
+        }
+        #jumpscare img { width: 100%; height: 100%; object-fit: cover; animation: shake 0.1s infinite; }
+        @keyframes shake {
+            0% { transform: translate(5px, 5px); }
+            25% { transform: translate(-5px, -5px); }
+            50% { transform: translate(5px, -5px); }
+            75% { transform: translate(-5px, 5px); }
+            100% { transform: translate(0, 0); }
+        }
+    </style>
+</head>
+<body>
+    <div id="ui">
+        TEMPO: <span id="timer">15</span>s | 
+        CHAVES: <span id="count">0</span>/20
+    </div>
+    <div id="jumpscare"><img src="Léo dark.jpg" alt="MORTE"></div>
+    <canvas id="gameCanvas"></canvas>
+
+    <script>
+        const canvas = document.getElementById('gameCanvas');
+        const ctx = canvas.getContext('2d');
+        const jumpscareDiv = document.getElementById('jumpscare');
+        const timerElement = document.getElementById('timer');
+        const countElement = document.getElementById('count');
+
+        // --- SISTEMA DE ÁUDIO ---
+        const musicaExploracao = new Audio('musica_fundo.mp3'); 
+        const musicaPerseguicao = new Audio('musica_perseguicao.mp3'); // NOVO ARQUIVO: Coloque uma música tensa aqui
+        const somSusto = new Audio('grito.mp3');
+        const somChave = new Audio('chave.mp3');
+        const musicaVitoria = new Audio('vitoria.mp3'); 
+        
+        musicaExploracao.loop = true;
+        musicaPerseguicao.loop = true;
+        musicaExploracao.volume = 0.5;
+        musicaPerseguicao.volume = 0.6;
+
+        let audioIniciado = false;
+        function iniciarMusica() {
+            if (!audioIniciado && !monstroAtivo) {
+                musicaExploracao.play().catch(() => {});
+                audioIniciado = true;
+            }
+        }
+
+        canvas.width = window.innerWidth;
+        canvas.height = window.innerHeight;
+
+        let gameOver = false;
+        let vitoria = false;
+        let tempoRestante = 15;
+        let monstroAtivo = false;
+        let chavesColetadas = 0;
+        let touchActive = false;
+        let touchTarget = { x: 0, y: 0 };
+
+        const player = { x: 50, y: 50, size: 14, speed: 6, color: '#ffffff' };
+        
+        const monster = {
+            x: canvas.width / 2,
+            y: canvas.height / 2,
+            width: 80, height: 105,
+            speed: 3.2, 
+            imgNormal: new Image(),
+            imgDark: new Image(),
+            currentImg: null
+        };
+        monster.imgNormal.src = 'Léo.jpg';
+        monster.imgDark.src = 'Léo dark.jpg';
+        monster.currentImg = monster.imgNormal;
+
+        const walls = [
+            { x: 180, y: 0, w: 20, h: 300 },
+            { x: 180, y: 450, w: 20, h: 400 },
+            { x: 400, y: 150, w: 20, h: 400 },
+            { x: 400, y: 150, w: 250, h: 20 },
+            { x: 650, y: 0, w: 20, h: 350 },
+            { x: 850, y: 200, w: 20, h: 500 },
+            { x: 0, y: 600, w: 300, h: 20 },
+            { x: 550, y: 550, w: 350, h: 20 },
+            { x: 950, y: 50, w: 20, h: 400 }
+        ];
+
+        const keysObj = [];
+        function gerarChaves() {
+            const numSetoresX = 5;
+            const numSetoresY = 4;
+            const setorW = canvas.width / numSetoresX;
+            const setorH = canvas.height / numSetoresY;
+
+            for (let i = 0; i < numSetoresX; i++) {
+                for (let j = 0; j < numSetoresY; j++) {
+                    let kx, ky;
+                    let tentativa = 0;
+                    do {
+                        kx = (i * setorW) + 40 + Math.random() * (setorW - 80);
+                        ky = (j * setorH) + 40 + Math.random() * (setorH - 80);
+                        tentativa++;
+                    } while (checkWall(kx - 10, ky - 10, 20, 20) && tentativa < 15);
+                    keysObj.push({ x: kx, y: ky, coletada: false });
+                }
+            }
+        }
+        gerarChaves();
+
+        window.addEventListener('keydown', iniciarMusica);
+        canvas.addEventListener('touchstart', iniciarMusica, { passive: false });
+
+        const inputKeys = {};
+        window.addEventListener('keydown', e => inputKeys[e.code] = true);
+        window.addEventListener('keyup', e => inputKeys[e.code] = false);
+        canvas.addEventListener('touchstart', e => { touchActive = true; updateTouch(e); }, { passive: false });
+        canvas.addEventListener('touchmove', e => updateTouch(e), { passive: false });
+        canvas.addEventListener('touchend', () => touchActive = false);
+
+        function updateTouch(e) {
+            e.preventDefault();
+            touchTarget.x = e.touches[0].clientX;
+            touchTarget.y = e.touches[0].clientY;
+        }
+
+        function checkWall(nx, ny, w_obj, h_obj) {
+            return walls.some(w => 
+                nx < w.x + w.w && nx + w_obj > w.x &&
+                ny < w.y + w.h && ny + h_obj > w.y
+            );
+        }
+
+        const timerInterval = setInterval(() => {
+            if (gameOver || vitoria) return;
+            if (tempoRestante > 0) {
+                tempoRestante--;
+                timerElement.innerText = tempoRestante;
+            } else if (!monstroAtivo) {
+                ativarPerseguicao();
+            }
+        }, 1000);
+
+        function ativarPerseguicao() {
+            monstroAtivo = true;
+            monster.currentImg = monster.imgDark;
+            timerElement.innerText = "FUJA!";
+            document.body.style.backgroundColor = "#5a0000"; 
+            
+            // TROCA DE MÚSICA AQUI
+            musicaExploracao.pause();
+            musicaPerseguicao.play().catch(() => {});
+        }
+
+        function update() {
+            if (gameOver || vitoria) return;
+            let moveX = 0, moveY = 0;
+            if (inputKeys['ArrowUp'] || inputKeys['KeyW']) moveY -= player.speed;
+            if (inputKeys['ArrowDown'] || inputKeys['KeyS']) moveY += player.speed;
+            if (inputKeys['ArrowLeft'] || inputKeys['KeyA']) moveX -= player.speed;
+            if (inputKeys['ArrowRight'] || inputKeys['KeyD']) moveX += player.speed;
+
+            if (touchActive) {
+                const dx = touchTarget.x - player.x;
+                const dy = touchTarget.y - player.y;
+                const dist = Math.sqrt(dx * dx + dy * dy);
+                if (dist > 10) {
+                    moveX = (dx / dist) * player.speed;
+                    moveY = (dy / dist) * player.speed;
+                }
+            }
+
+            if (!checkWall(player.x + moveX - player.size, player.y - player.size, player.size*2, player.size*2)) player.x += moveX;
+            if (!checkWall(player.x - player.size, player.y + moveY - player.size, player.size*2, player.size*2)) player.y += moveY;
+
+            keysObj.forEach(k => {
+                if (!k.coletada) {
+                    const d = Math.sqrt((player.x - k.x)**2 + (player.y - k.y)**2);
+                    if (d < 30) {
+                        k.coletada = true;
+                        chavesColetadas++;
+                        countElement.innerText = chavesColetadas;
+                        somChave.currentTime = 0;
+                        somChave.play().catch(() => {});
+                    }
+                }
+            });
+
+            if (monstroAtivo) {
+                const mdx = player.x - (monster.x + monster.width/2);
+                const mdy = player.y - (monster.y + monster.height/2);
+                const mdist = Math.sqrt(mdx * mdx + mdy * mdy);
+                monster.x += (mdx / mdist) * monster.speed;
+                monster.y += (mdy / mdist) * monster.speed;
+                if (mdist < 42) {
+                    gameOver = true;
+                    clearInterval(timerInterval);
+                    musicaPerseguicao.pause(); // Para a música de perseguição na morte
+                    somSusto.play();
+                    jumpscareDiv.style.display = 'block';
+                    setTimeout(() => location.reload(), 2500);
+                }
+            }
+
+            if (chavesColetadas === 20) {
+                vitoria = true;
+                clearInterval(timerInterval);
+                musicaExploracao.pause();
+                musicaPerseguicao.pause();
+                musicaVitoria.play().catch(() => {});
+                alert("VOCÊ SOBREVIVEU!");
+                location.reload();
+            }
+        }
+
+        function draw() {
+            ctx.fillStyle = monstroAtivo ? '#2a0000' : 'black';
+            ctx.fillRect(0, 0, canvas.width, canvas.height);
+            ctx.fillStyle = monstroAtivo ? '#900' : '#151515';
+            walls.forEach(w => ctx.fillRect(w.x, w.y, w.w, w.h));
+            
+            keysObj.forEach(k => {
+                if (!k.coletada) {
+                    ctx.fillStyle = '#FFD700';
+                    ctx.beginPath();
+                    ctx.arc(k.x, k.y, 7, 0, Math.PI * 2);
+                    ctx.fill();
+                    ctx.shadowBlur = 12;
+                    ctx.shadowColor = "gold";
+                }
+            });
+            ctx.shadowBlur = 0;
+
+            const grad = ctx.createRadialGradient(player.x, player.y, 5, player.x, player.y, monstroAtivo ? 280 : 320);
+            grad.addColorStop(0, 'rgba(255, 255, 255, 0.2)');
+            grad.addColorStop(0.6, 'rgba(0, 0, 0, 0.1)');
+            grad.addColorStop(1, monstroAtivo ? 'rgba(0, 0, 0, 0.7)' : 'rgba(0, 0, 0, 0.95)');
+            ctx.fillStyle = grad;
+            ctx.fillRect(0, 0, canvas.width, canvas.height);
+            
+            ctx.fillStyle = player.color;
+            ctx.beginPath();
+            ctx.arc(player.x, player.y, player.size, 0, Math.PI * 2);
+            ctx.fill();
+            ctx.drawImage(monster.currentImg, monster.x, monster.y, monster.width, monster.height);
+        }
+
+        function gameLoop() {
+            update();
+            draw();
+            requestAnimationFrame(gameLoop);
+        }
+        monster.imgNormal.onload = gameLoop;
+    </script>
+</body>
+</html>
