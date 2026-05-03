@@ -2,7 +2,7 @@
 <html lang="pt-br">
 <head>
     <meta charset="UTF-8">
-    <title>DESAFIO DAS 20 CHAVES - TRILHA DINÂMICA</title>
+    <title>DESAFIO DAS 20 CHAVES</title>
     <style>
         body { margin: 0; overflow: hidden; background: #050505; font-family: 'Courier New', Courier, monospace; touch-action: none; transition: background-color 1s ease; }
         #gameCanvas { display: block; filter: contrast(1.1) brightness(1); }
@@ -13,12 +13,18 @@
             background: rgba(0, 0, 0, 0.8); padding: 10px; border-radius: 5px;
             border: 1px solid #900;
         }
-        #jumpscare {
+        /* Telas de sobreposição (Morte e Vitória) */
+        .overlay {
             display: none; position: fixed;
             top: 0; left: 0; width: 100vw; height: 100vh;
-            background-color: black; z-index: 999;
+            z-index: 999;
         }
+        #jumpscare { background-color: black; }
         #jumpscare img { width: 100%; height: 100%; object-fit: cover; animation: shake 0.1s infinite; }
+        
+        #vitoria-screen { background-color: rgba(0, 20, 0, 0.9); text-align: center; }
+        #vitoria-screen img { width: 100%; height: 100%; object-fit: contain; border: 5px solid gold; box-sizing: border-box; }
+
         @keyframes shake {
             0% { transform: translate(5px, 5px); }
             25% { transform: translate(-5px, -5px); }
@@ -33,19 +39,26 @@
         TEMPO: <span id="timer">15</span>s | 
         CHAVES: <span id="count">0</span>/20
     </div>
-    <div id="jumpscare"><img src="Léo dark.jpg" alt="MORTE"></div>
+
+    <!-- Tela de Morte -->
+    <div id="jumpscare" class="overlay"><img src="Léo dark.jpg" alt="MORTE"></div>
+    
+    <!-- Tela de Vitória -->
+    <div id="vitoria-screen" class="overlay"><img src="vitoria.jpg" alt="VOCÊ VENCEU!"></div>
+
     <canvas id="gameCanvas"></canvas>
 
     <script>
         const canvas = document.getElementById('gameCanvas');
         const ctx = canvas.getContext('2d');
         const jumpscareDiv = document.getElementById('jumpscare');
+        const vitoriaDiv = document.getElementById('vitoria-screen');
         const timerElement = document.getElementById('timer');
         const countElement = document.getElementById('count');
 
-        // --- SISTEMA DE ÁUDIO ---
+        // --- ÁUDIOS ---
         const musicaExploracao = new Audio('musica_fundo.mp3'); 
-        const musicaPerseguicao = new Audio('musica_perseguicao.mp3'); // NOVO ARQUIVO: Coloque uma música tensa aqui
+        const musicaPerseguicao = new Audio('musica_perseguicao.mp3');
         const somSusto = new Audio('grito.mp3');
         const somChave = new Audio('chave.mp3');
         const musicaVitoria = new Audio('vitoria.mp3'); 
@@ -152,20 +165,14 @@
                 tempoRestante--;
                 timerElement.innerText = tempoRestante;
             } else if (!monstroAtivo) {
-                ativarPerseguicao();
+                monstroAtivo = true;
+                monster.currentImg = monster.imgDark;
+                timerElement.innerText = "FUJA!";
+                document.body.style.backgroundColor = "#5a0000"; 
+                musicaExploracao.pause();
+                musicaPerseguicao.play().catch(() => {});
             }
         }, 1000);
-
-        function ativarPerseguicao() {
-            monstroAtivo = true;
-            monster.currentImg = monster.imgDark;
-            timerElement.innerText = "FUJA!";
-            document.body.style.backgroundColor = "#5a0000"; 
-            
-            // TROCA DE MÚSICA AQUI
-            musicaExploracao.pause();
-            musicaPerseguicao.play().catch(() => {});
-        }
 
         function update() {
             if (gameOver || vitoria) return;
@@ -210,21 +217,27 @@
                 if (mdist < 42) {
                     gameOver = true;
                     clearInterval(timerInterval);
-                    musicaPerseguicao.pause(); // Para a música de perseguição na morte
+                    musicaPerseguicao.pause();
                     somSusto.play();
                     jumpscareDiv.style.display = 'block';
                     setTimeout(() => location.reload(), 2500);
                 }
             }
 
+            // --- LÓGICA DE VITÓRIA ATUALIZADA ---
             if (chavesColetadas === 20) {
                 vitoria = true;
                 clearInterval(timerInterval);
                 musicaExploracao.pause();
                 musicaPerseguicao.pause();
                 musicaVitoria.play().catch(() => {});
-                alert("VOCÊ SOBREVIVEU!");
-                location.reload();
+                
+                vitoriaDiv.style.display = 'block'; // Mostra a foto de comemoração
+                
+                setTimeout(() => {
+                    alert("VOCÊ SOBREVIVEU!");
+                    location.reload();
+                }, 5000); // Fica 5 segundos na tela antes de reiniciar
             }
         }
 
